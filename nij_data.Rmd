@@ -1,0 +1,372 @@
+---
+title: "NIJ_data_cleanup"
+author: "Anna Evans"
+date: '2022-06-17'
+output:
+  #pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(crosstable)
+```
+
+```{r}
+#Read in data
+nij_full <- read.csv("../BJS/NIJ_s_Recidivism_Challenge_Training_Dataset.csv")
+#Missing values converted to NAs
+nij_full <- nij_full %>% 
+  mutate_all(na_if, "")
+```
+
+```{r}
+#Select relevant variables
+nij_df <- nij_full %>% select(Gender, Race, Age_at_Release, Prison_Offense, Prior_Arrest_Episodes_Felony, Recidivism_Within_3years, Recidivism_Arrest_Year1, Recidivism_Arrest_Year2, Recidivism_Arrest_Year3)
+```
+#Recidivism crosstable year 1
+```{r}
+crosstable(nij_df, c(Race, Gender, Age_at_Release, Prison_Offense, Prior_Arrest_Episodes_Felony), by=Recidivism_Arrest_Year1) %>% 
+  as_flextable()
+```
+#Recidivism crosstable year 2
+```{r}
+crosstable(nij_df, c(Race, Gender, Age_at_Release, Prison_Offense, Prior_Arrest_Episodes_Felony), by=Recidivism_Arrest_Year2) %>% 
+  as_flextable()
+```
+#Recidivism crosstable year 3
+```{r}
+crosstable(nij_df, c(Race, Gender, Age_at_Release, Prison_Offense, Prior_Arrest_Episodes_Felony), by=Recidivism_Arrest_Year3) %>% 
+  as_flextable()
+```
+#Failure rate of all persons
+```{r}
+#Failure rate for year 1
+year1 <- nij_df %>% 
+  group_by(Recidivism_Arrest_Year1) %>% 
+  summarize(n = n(), recidivism_arrest_year = 1) %>% 
+  mutate(failure_rate = n/sum(n)*100) %>% 
+  filter(Recidivism_Arrest_Year1 == "true") %>% 
+  ungroup()
+
+#Failure rate for year 2
+year2 <- nij_df %>% 
+  group_by(Recidivism_Arrest_Year2) %>% 
+  filter(Recidivism_Arrest_Year1 == "false") %>% 
+  summarize(n = n(), recidivism_arrest_year = 2) %>% 
+  mutate(failure_rate = n/sum(n)*100) %>% 
+  filter(Recidivism_Arrest_Year2 == "true") %>% 
+  ungroup()
+
+#Failure rate for year 3
+year3 <- nij_df %>% 
+  group_by(Recidivism_Arrest_Year3) %>% 
+  filter(Recidivism_Arrest_Year2 == "false", Recidivism_Arrest_Year1 == "false") %>% 
+  summarize(n = n(), recidivism_arrest_year = 3) %>% 
+  mutate(failure_rate = n/sum(n)*100) %>% 
+  filter(Recidivism_Arrest_Year3 == "true") %>% 
+  ungroup()
+
+#Combine all failure rates into one data frame
+fr_all <- bind_rows(year1, year2, year3) %>% 
+  select(recidivism_arrest_year, failure_rate, n) %>% 
+  mutate(category = "all", attribute = NA, .before = recidivism_arrest_year)
+```
+
+#Failure rate by category function
+```{r}
+#Function that creates a data frame of failure rates of all years for each attribute of a given variable
+fr_table <- function(df, x){
+  
+x <- enquo(x)
+  year1 <- df %>% 
+  group_by(!!x, Recidivism_Arrest_Year1) %>% 
+  summarize(n = n(), recidivism_arrest_year = 1) %>% 
+  mutate(failure_rate = n/sum(n)*100) %>% 
+  filter(Recidivism_Arrest_Year1 == "true") %>% 
+  ungroup()
+
+year2 <- df %>% 
+  group_by(!!x, Recidivism_Arrest_Year2) %>% 
+  filter(Recidivism_Arrest_Year1 == "false") %>% 
+  summarize(n = n(), recidivism_arrest_year = 2) %>% 
+  mutate(failure_rate = n/sum(n)*100) %>% 
+  filter(Recidivism_Arrest_Year2 == "true") %>% 
+  ungroup()
+
+year3 <- df %>% 
+  group_by(!!x, Recidivism_Arrest_Year3) %>% 
+  filter(Recidivism_Arrest_Year2 == "false", Recidivism_Arrest_Year1 == "false") %>% 
+  summarize(n = n(), recidivism_arrest_year = 3) %>% 
+  mutate(failure_rate = n/sum(n)*100) %>% 
+  filter(Recidivism_Arrest_Year3 == "true") %>% 
+  ungroup()
+
+bind_rows(year1, year2, year3) %>% 
+  select(!!x, recidivism_arrest_year, failure_rate, n) %>% 
+  mutate(attribute = !!x, .before = recidivism_arrest_year) %>% 
+  select(attribute, recidivism_arrest_year, failure_rate, n) -> fr_df
+
+return(fr_df)
+}
+```
+#Failure rate dataframe
+```{r}
+#Combining all failure rates of each variable
+fr_table(nij_df, Gender) %>% mutate(category = "Gender", .before = attribute) -> fr_gender
+fr_table(nij_df, Race) %>% mutate(category = "Race", .before = attribute)->fr_race
+fr_table(nij_df, Age_at_Release) %>% mutate(category = "Age_at_Release", .before = attribute) ->fr_age
+fr_table(nij_df, Prison_Offense) %>% mutate(category = "Prison_Offense", .before = attribute) ->fr_offense
+fr_table(nij_df, Prior_Arrest_Episodes_Felony) %>% mutate(category = "Prior_Arrest_Episodes_Felony", .before = attribute) ->fr_priorar
+
+bind_rows(fr_all, fr_gender, fr_race, fr_age, fr_offense, fr_priorar) -> fr_by_cat
+```
+#Cumulative recidivism for all persons
+```{r}
+ year1 <- nij_df %>% 
+  group_by(Recidivism_Arrest_Year1) %>% 
+  summarize(n = n(), recidivism_arrest_year = 1) %>% 
+  mutate(cum_recid = n/sum(n)*100) %>% 
+  filter(Recidivism_Arrest_Year1 == "true") %>% 
+  ungroup()
+
+year2 <- nij_df %>% 
+  group_by(Recidivism_Arrest_Year2) %>% 
+  summarize(n = n(), recidivism_arrest_year = 2) %>% 
+  mutate(failure_rate_yr2 = n/sum(n)*100 ) %>% 
+  filter(Recidivism_Arrest_Year2 == "true") %>% 
+  ungroup()
+
+year2['year1fr'] <- year1$cum_recid
+year2 %>% mutate(cum_recid = failure_rate_yr2 + year1fr) -> year2
+
+year3 <- nij_df %>% 
+  group_by(Recidivism_Arrest_Year3) %>% 
+  summarize(n = n(), recidivism_arrest_year = 3) %>% 
+  mutate(failure_rate = n/sum(n)*100) %>% 
+  filter(Recidivism_Arrest_Year3 == "true") %>% 
+  ungroup()
+
+year3['year2cum'] <- year2$cum_recid
+year3 %>% mutate(cum_recid = failure_rate + year2cum) -> year3
+
+bind_rows(year1, year2, year3) %>% 
+  select(recidivism_arrest_year, cum_recid, n) %>% 
+  mutate(attribute = "all") -> cum_recid
+```
+#Cumulative recidivism by category
+```{r}
+#Function that creates a dataframe of the cumulative recidivism rate for all years and attributes of a given variable
+cum_recid_table <- function(df, x){
+  x <- enquo(x)
+  year1 <- df %>% 
+  group_by(!!x, Recidivism_Arrest_Year1) %>% 
+  summarize(n = n(), recidivism_arrest_year = 1) %>% 
+  mutate(cum_recid = n/sum(n)*100) %>% 
+  filter(Recidivism_Arrest_Year1 == "true") %>% 
+  ungroup()
+
+year2 <- df %>% 
+  group_by(!!x, Recidivism_Arrest_Year2) %>% 
+  summarize(n = n(), recidivism_arrest_year = 2) %>% 
+  mutate(failure_rate_yr2 = n/sum(n)*100 ) %>% 
+  filter(Recidivism_Arrest_Year2 == "true") %>% 
+  ungroup()
+
+year2['year1fr'] <- year1$cum_recid
+year2 %>% mutate(cum_recid = failure_rate_yr2 + year1fr) -> year2
+
+year3 <- df %>% 
+  group_by(!!x, Recidivism_Arrest_Year3) %>% 
+  summarize(n = n(), recidivism_arrest_year = 3) %>% 
+  mutate(failure_rate = n/sum(n)*100) %>% 
+  filter(Recidivism_Arrest_Year3 == "true") %>% 
+  ungroup()
+
+year3['year2cum'] <- year2$cum_recid
+year3 %>% mutate(cum_recid = failure_rate + year2cum) -> year3
+
+bind_rows(year1, year2, year3) %>% 
+  select(!!x, recidivism_arrest_year, cum_recid, n) %>% 
+  rename(attribute = !!x) -> cr_df
+return(cr_df)
+}
+#Combining all cumulative recidivism rates by variable
+cum_recid_table(nij_df, Gender) -> cr_gender
+cum_recid_table(nij_df, Race) -> cr_race
+cum_recid_table(nij_df, Age_at_Release) -> cr_age
+cum_recid_table(nij_df, Prison_Offense) -> cr_offense
+cum_recid_table(nij_df, Prior_Arrest_Episodes_Felony) -> cr_priorar
+
+bind_rows(cum_recid, cr_gender, cr_race, cr_age, cr_offense, cr_priorar) -> cr_by_cat
+```
+#Final df and create csv
+```{r}
+#Joining cumulative recidivism rates and annual failure rates into one table
+left_join(fr_by_cat, cr_by_cat, by = c("attribute", "recidivism_arrest_year")) %>% 
+  select(!n.y) %>% 
+  rename(n = n.x) -> nij_fr_cr
+nij_fr_cr
+
+write.csv(nij_fr_cr, "nij_fr_cr.csv")
+```
+#All
+```{r}
+nij_fr_cr %>% 
+  filter(category == "all") %>% 
+  ggplot(aes(recidivism_arrest_year, failure_rate)) +
+  geom_line() +
+  geom_point()
+nij_fr_cr %>% 
+  filter(category == "all") %>% 
+  ggplot(aes(recidivism_arrest_year, cum_recid)) +
+  geom_line() +
+  geom_point()
+
+#Bar graph
+nij_fr_cr %>% 
+  filter(category == "all") %>% 
+  ggplot() +
+  geom_bar(aes(x = recidivism_arrest_year, y = failure_rate), stat="identity")
+nij_fr_cr %>% 
+  filter(category == "all") %>% 
+  ggplot() +
+  geom_bar(aes(x = recidivism_arrest_year, y = cum_recid), stat="identity")
+```
+#Gender
+```{r}
+nij_fr_cr %>% 
+  filter(category == "Gender") %>% 
+  ggplot(aes(recidivism_arrest_year, failure_rate, color = attribute)) +
+  geom_line() +
+  scale_colour_discrete(name="Gender")+
+  geom_point()
+nij_fr_cr %>% 
+  filter(category == "Gender") %>% 
+  ggplot(aes(recidivism_arrest_year, cum_recid, color = attribute)) +
+  geom_line() +
+  scale_colour_discrete(name="Gender")+
+  geom_point()
+
+#Stacked bar graph
+nij_fr_cr %>% 
+  filter(category == "Gender") %>% 
+  ggplot() +
+  geom_bar(aes(fill = attribute, x = recidivism_arrest_year, y = failure_rate), position="stack", stat="identity") +
+  scale_fill_discrete(name="Gender")
+nij_fr_cr %>% 
+  filter(category == "Gender") %>% 
+  ggplot() +
+  geom_bar(aes(fill = attribute, x = recidivism_arrest_year, y = cum_recid), position="stack", stat="identity") +
+  scale_fill_discrete(name="Gender")
+```
+#Race
+```{r}
+#Line graphs
+nij_fr_cr %>% 
+  filter(category == "Race") %>% 
+  ggplot(aes(recidivism_arrest_year, failure_rate, color = attribute)) +
+  geom_line() +
+  scale_colour_discrete(name="Race")+
+  geom_point()
+nij_fr_cr %>% 
+  filter(category == "Race") %>% 
+  ggplot(aes(recidivism_arrest_year, cum_recid, color = attribute)) +
+  geom_line() +
+  scale_colour_discrete(name="Race")+
+  geom_point()
+
+#Stacked bar graph
+nij_fr_cr %>% 
+  filter(category == "Race") %>% 
+  ggplot() +
+  geom_bar(aes(fill = attribute, x = recidivism_arrest_year, y = failure_rate), position="stack", stat="identity") +
+  scale_fill_discrete(name="Race")
+nij_fr_cr %>% 
+  filter(category == "Race") %>% 
+  ggplot() +
+  geom_bar(aes(fill = attribute, x = recidivism_arrest_year, y = cum_recid), position="stack", stat="identity") +
+  scale_fill_discrete(name="Race")
+```
+#Age at release
+```{r}
+nij_fr_cr %>% 
+  filter(category == "Age_at_Release") %>% 
+  ggplot(aes(recidivism_arrest_year, failure_rate, color = attribute)) +
+  geom_line() +
+  scale_colour_discrete(name="Age_at_Release")+
+  geom_point()
+nij_fr_cr %>% 
+  filter(category == "Age_at_Release") %>% 
+  ggplot(aes(recidivism_arrest_year, cum_recid, color = attribute)) +
+  geom_line() +
+  scale_colour_discrete(name="Age_at_Release")+
+  geom_point()
+
+#Stacked bar graph
+nij_fr_cr %>% 
+  filter(category == "Age_at_Release") %>% 
+  ggplot() +
+  geom_bar(aes(fill = attribute, x = recidivism_arrest_year, y = failure_rate), position="stack", stat="identity") +
+  scale_fill_discrete(name="Age_at_Release")
+nij_fr_cr %>% 
+  filter(category == "Age_at_Release") %>% 
+  ggplot() +
+  geom_bar(aes(fill = attribute, x = recidivism_arrest_year, y = cum_recid), position="stack", stat="identity") +
+  scale_fill_discrete(name="Age_at_Release")
+```
+#Prison Offense
+```{r}
+nij_fr_cr %>% 
+  filter(category == "Prison_Offense") %>% 
+  ggplot(aes(recidivism_arrest_year, failure_rate, color = attribute)) +
+  geom_line() +
+  scale_colour_discrete(name="Prison_Offense")+
+  geom_point()
+nij_fr_cr %>% 
+  filter(category == "Prison_Offense") %>% 
+  ggplot(aes(recidivism_arrest_year, cum_recid, color = attribute)) +
+  geom_line() +
+  scale_colour_discrete(name="Prison_Offense")+
+  geom_point()
+
+#Stacked bar graph
+nij_fr_cr %>% 
+  filter(category == "Prison_Offense") %>% 
+  ggplot() +
+  geom_bar(aes(fill = attribute, x = recidivism_arrest_year, y = failure_rate), position="stack", stat="identity") +
+  scale_fill_discrete(name="Prison_Offense")
+nij_fr_cr %>% 
+  filter(category == "Prison_Offense") %>% 
+  ggplot() +
+  geom_bar(aes(fill = attribute, x = recidivism_arrest_year, y = cum_recid), position="stack", stat="identity") +
+  scale_fill_discrete(name="Prison_Offense")
+```
+#Prior arrest episodes
+```{r}
+nij_fr_cr %>% 
+  filter(category == "Prior_Arrest_Episodes_Felony") %>% 
+  ggplot(aes(recidivism_arrest_year, failure_rate, color = attribute)) +
+  geom_line() +
+  scale_colour_discrete(name="Prior_Arrest_Episodes_Felony")+
+  geom_point()
+nij_fr_cr %>% 
+  filter(category == "Prior_Arrest_Episodes_Felony") %>% 
+  ggplot(aes(recidivism_arrest_year, cum_recid, color = attribute)) +
+  geom_line() +
+  scale_colour_discrete(name="Prior_Arrest_Episodes_Felony")+
+  geom_point()
+
+#Stacked bar graph
+nij_fr_cr %>% 
+  filter(category == "Prior_Arrest_Episodes_Felony") %>% 
+  ggplot() +
+  geom_bar(aes(fill = attribute, x = recidivism_arrest_year, y = failure_rate), position="stack", stat="identity") +
+  scale_fill_discrete(name="Prior_Arrest_Episodes_Felony")
+nij_fr_cr %>% 
+  filter(category == "Prior_Arrest_Episodes_Felony") %>% 
+  ggplot() +
+  geom_bar(aes(fill = attribute, x = recidivism_arrest_year, y = cum_recid), position="stack", stat="identity") +
+  scale_fill_discrete(name="Prior_Arrest_Episodes_Felony")
+```
