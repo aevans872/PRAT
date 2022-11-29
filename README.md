@@ -7,4 +7,4 @@ Before creating the tool, I cleaned the raw data so it could be in a useable for
 
 After data preprocessing was complete, I created the dashboard in Tableau. The final dashboard allows the user to visualize important metrics such as cumulative recidivism rate and annual failure rate, both altogether and separated by certain attributes. The standard deviation and confidence interval of these metrics is displayed as well. The user can also review characteristics of the dataset such as the distribution of the data by attribute and geographically by state.
 
-The link to the final Tableau dashboard can be found here: https://public.tableau.com/views/PRAT-NIJData/PRATTool?:language=en-US&:display_count=n&:origin=viz_share_link
+**The link to the final Tableau dashboard can be found here: https://public.tableau.com/views/PRAT-NIJData/PRATTool?:language=en-US&:display_count=n&:origin=viz_share_link
